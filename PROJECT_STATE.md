@@ -1,458 +1,579 @@
 # AutoRisk Insight - Project State
 
-## Project Overview
+This is the handoff document for future ChatGPT/Codex sessions working on AutoRisk Insight. Read this file and `README.md` before changing the project.
+
+## Product Summary
+
+AutoRisk Insight is a Next.js + TypeScript MVP for budget-aware screening of Australian used-car listings.
+
+The product focuses on affordable listings up to around $15,000. Users select a budget range, paste a raw marketplace listing, review/edit extracted vehicle details, then receive a Buying Confidence Score with short reasons, next steps, and model-specific inspection priorities.
+
+Positioning:
+
+* It is an early-stage screening tool.
+* It is not a final purchase recommendation.
+* It helps buyers decide whether a listing is worth asking about, inspecting, or spending more time on.
+* It should use cautious, evidence-based language.
+
+Core rule:
+
+```txt
+OpenAI is used for extraction and evidence detection only.
+Fallback extraction keeps the app usable without AI.
+AI and fallback extraction are merged to avoid missing clear signals.
+The final Buying Confidence Score is rule-based and explainable.
+```
 
-AutoRisk Insight is a Next.js + TypeScript project for used car risk analysis in Australia.
+## Current Status
+
+The MVP flow is implemented locally:
+
+* Budget range selection.
+* Raw listing input.
+* Extraction layer with OpenAI path and fallback path.
+* API route for OpenAI structured extraction.
+* Fallback vehicle extraction.
+* Fallback evidence extraction.
+* Merge behavior between OpenAI extraction and deterministic fallback extraction.
+* Review/edit screen before scoring.
+* Known issue matching for model-specific inspection priorities.
+* Budget-aware rule-based scoring.
+* Compact result screen with Buying Confidence Score, recommendation, summary, top reasons, next steps, vehicle summary, and secondary details.
 
-The app is designed to help used car buyers paste a marketplace listing from platforms such as Facebook Marketplace, Gumtree, or Carsales, extract key vehicle details, review and edit the extracted information, match model-specific inspection priorities, and generate a quick risk report.
+Known gaps:
 
-The project is not intended to replace PPSR checks, official recall checks, legal advice, or professional mechanical inspections. It is designed as a decision-support tool for early-stage used car screening.
+* OpenAI extraction still depends on real API key, billing, and model access.
+* No screenshot upload, OCR, or vision flow.
+* No PPSR, VIN, rego, recall, finance owing, stolen status, or accident-history verification.
+* No saved listings, comparisons, accounts, or database.
+* No production deployment notes beyond environment variable setup.
+* Score thresholds should be tuned against more real Australian listings under $15,000.
 
-## Recent Update
+## Current User Flow
 
-- The UI now has a stronger automotive / used-car inspection visual identity.
-- A speedometer/gauge-style inline SVG brand mark was added next to `AutoRisk Insight`.
-- Hero copy was updated to make the product feel like a pre-purchase listing check: "Before you inspect the car, inspect the listing first."
-- The colour palette was refined toward charcoal/deep navy, white cards, a light grey background, subtle borders, and green / amber / orange / red risk-state accents.
-- The current staged flow remains `InputView` -> `ReviewView` -> `ResultView`, with the textarea hidden after analysis.
-- The Result View remains decision-focused with score, recommendation, summary, and next steps visible while detailed report sections stay collapsed or secondary.
-- This was a UI-only change and did not modify business logic, risk scoring logic, extraction logic, known issue matching, known issue data, or TypeScript data models.
+1. User selects a budget range.
+2. User pastes a used-car listing.
+3. The extraction layer runs.
+4. If AI extraction is enabled, `app/api/extract-listing/route.ts` calls OpenAI.
+5. If AI is disabled or unavailable, fallback extraction is used.
+6. OpenAI extraction and fallback extraction are merged to improve accuracy.
+7. User reviews and edits extracted vehicle details.
+8. `knownIssueMatcher.ts` finds model-specific inspection priorities.
+9. `riskEngine.ts` calculates a budget-aware Buying Confidence Score.
+10. `ResultView` shows a compact result card with score, recommendation, summary, top reasons, next steps, and secondary detailed report.
 
-## Project Goal
+Screen progression:
 
-The goal is to build an AI-assisted and rule-based used car risk analysis tool.
+```txt
+InputView -> ReviewView -> ResultView
+```
 
-The core user flow is:
+## Budget Ranges
 
-1. User pastes a raw used car listing.
-2. The app extracts vehicle information into a structured VehicleInput.
-3. The user reviews and edits the extracted details.
-4. The app matches the vehicle against source-backed model-specific inspection priorities.
-5. The app runs a rule-based quick risk scan.
-6. The app displays a quick risk report and inspection guidance.
+Current budget ranges:
 
-## Current Tech Stack
+* Not sure yet
+* Under $5,000
+* $5,000-$8,000
+* $8,000-$11,000
+* $11,000-$15,000
 
-- Next.js App Router
-- TypeScript
-- Tailwind CSS
-- React state management with useState
-- Mock extractor for MVP
-- Rule-based risk engine
-- Source-backed known issues / inspection priority dataset
+Budget range affects age and mileage expectations. A 15-year-old car with high mileage may be more acceptable under $5,000 than in the $11,000-$15,000 range.
 
-OpenAI API is not connected yet. The current MVP uses mock and rule-based logic first.
+Use budget range for budget-aware screening, not absolute car quality judgement.
 
-## Current File Structure
+## Architecture
 
-Current important files:
+```txt
+app/
+  api/
+    extract-listing/
+      route.ts
+  page.tsx
+  layout.tsx
+  globals.css
 
-- app/page.tsx
-- components/BrandMark.tsx
-- components/InputView.tsx
-- components/ReviewView.tsx
-- components/ResultView.tsx
-- components/ScoreRing.tsx
-- components/VehicleSummaryCard.tsx
-- lib/types.ts
-- lib/mockExtractor.ts
-- lib/riskEngine.ts
-- lib/knownIssueMatcher.ts
-- data/knownIssues.ts
-- PROJECT_STATE.md
+components/
+  BrandMark.tsx
+  InputView.tsx
+  ReviewView.tsx
+  ResultView.tsx
+  ScoreRing.tsx
+  VehicleSummaryCard.tsx
 
-## Current Implementation Status
+lib/
+  openaiExtractor.ts
+  mockExtractor.ts
+  evidenceExtractor.ts
+  knownIssueMatcher.ts
+  riskEngine.ts
+  types.ts
 
-### 1. app/page.tsx
+data/
+  knownIssues.ts
+```
 
-Current role:
+## Important File Roles
 
-- Orchestrates the staged AutoRisk Insight flow.
-- Shows `InputView`, `ReviewView`, or `ResultView` depending on current state.
-- Stores the input in rawListingText.
-- Uses extractListingMock() to extract vehicle details.
-- Lets the user review and edit extracted vehicle information in `ReviewView`.
-- Displays a compact Buying Confidence decision card in `ResultView` after running the risk scan.
-- Keeps detailed extracted data, inspection priorities, and full risk details collapsed or secondary by default.
-- Uses Tailwind CSS for UI styling in component files.
+### `app/page.tsx`
 
-Current flow in page.tsx:
+Main client-side orchestrator for the staged flow.
 
-1. User pastes a listing.
-2. User clicks Check This Listing.
-3. extractListingMock(rawListingText) creates VehicleInput.
-4. User reviews and edits extracted details.
-5. User clicks Run Listing Check.
-6. analyseQuickRisk(...) creates RiskResult.
-7. A compact decision-card/dashboard result is displayed.
+Responsibilities:
 
-Current important states:
+* Stores raw listing text.
+* Stores selected budget range.
+* Stores extracted/reviewed vehicle data.
+* Stores listing evidence.
+* Stores matched known issues.
+* Stores final risk result.
+* Switches between `InputView`, `ReviewView`, and `ResultView`.
+* Starts extraction.
+* Runs model-specific inspection priority matching.
+* Runs final scoring.
+* Resets the flow.
 
-- rawListingText: stores the raw pasted marketplace listing.
-- extractedVehicle: stores the extracted and reviewed VehicleInput.
-- riskResult: stores the output from the quick risk engine.
-- matchedIssues: stores matched KnownIssue inspection priorities for the reviewed vehicle.
+Known issue matching should not block the result flow. If matching fails, continue with an empty inspection priority list.
 
-### 2. lib/types.ts
+### `components/InputView.tsx`
 
-Current role:
+Budget and listing input screen.
 
-Defines the shared data structures used across the project.
+Responsibilities:
 
-Important types:
+* Shows the budget range options.
+* Accepts raw marketplace listing text.
+* Calls the extraction handler.
+* Shows loading/disabled state while extraction runs.
 
-- VehicleInput
-- Recommendation
-- RiskLevel
-- RiskResult
-- KnownIssue
-- SourceQuality
+### `components/ReviewView.tsx`
 
-Current design direction:
+Review/edit screen.
 
-VehicleInput is the structured vehicle data extracted from a listing.
+Responsibilities:
 
-RiskResult is the output of the quick risk engine.
+* Displays extracted vehicle fields.
+* Lets the user correct vehicle details before scoring.
+* Preserves raw listing text and extraction metadata.
+* Calls the final scan handler.
+* Allows start-over navigation.
 
-KnownIssue is not treated as a confirmed defect. It is treated as a source-backed model-specific inspection priority.
+The review step is important because extraction can be wrong, especially for messy marketplace text.
 
-Important design decision:
+### `components/ResultView.tsx`
 
-KnownIssues are inspection priorities, not confirmed faults.
+Final decision screen.
 
-### 3. lib/mockExtractor.ts
+Responsibilities:
 
-Current role:
+* Shows the Buying Confidence Score.
+* Shows confidence band, recommendation, summary, top reasons, and next steps.
+* Shows `VehicleSummaryCard`.
+* Shows model-specific inspection priorities as secondary guidance.
+* Shows detailed report information without making the screen feel like a long AI report.
+* Uses cautious language around seller claims, missing information, and not confirmed faults.
 
-Converts raw marketplace listing text into a VehicleInput object.
+### `components/ScoreRing.tsx`
 
-Current extracted fields include:
+Visual score display.
 
-- make
-- model
-- year
-- mileage
-- price
-- transmission
-- fuelType
-- sellerType
-- serviceHistoryStatus
-- regoMentioned
-- sellerDescription
-- rawListingText
-- extractionMethod
+Responsibilities:
 
-Current limitations:
+* Displays the Buying Confidence Score.
+* Uses score/confidence band styling.
+* Supports the compact result-card layout.
 
-- It is still a basic mock/regex-style extractor.
-- It may confuse price and year in some cases.
-- It does not yet deeply extract fuel type, body style, seller type, or detailed service history.
-- It is acceptable for MVP flow testing but should later be improved or replaced with OpenAI structured extraction.
+### `components/VehicleSummaryCard.tsx`
 
-### 4. lib/riskEngine.ts
+Compact vehicle summary.
 
-Current role:
+Responsibilities:
 
-Takes a VehicleInput and generates a RiskResult.
+* Shows the reviewed vehicle identity and key listing details.
+* Helps the user confirm the result applies to the correct vehicle.
 
-Current risk factors include:
+### `lib/openaiExtractor.ts`
 
-- Unknown make/model/year
-- Old vehicle year
-- High mileage
-- Missing price
-- Unknown transmission
-- Missing service history
-- Rego not mentioned
-- Seller red flags such as:
-  - selling as is
-  - no rwc
-  - engine light
-  - urgent sale
-  - cash only
+Frontend extraction layer.
 
-Current output includes:
+Responsibilities:
 
-- recommendation
-- riskScore
-- riskLevel
-- riskReasons
-- missingInformation
-- sellerRedFlags
+* Reads `NEXT_PUBLIC_USE_AI_EXTRACTION`.
+* Calls `/api/extract-listing` when AI extraction is enabled.
+* Runs fallback extraction when AI is disabled or unavailable.
+* Merges OpenAI extraction with deterministic fallback extraction.
+* Returns a consistent extraction result to the app.
 
-Important future improvement:
+Important: OpenAI extraction must remain extraction-only. It should not calculate the Buying Confidence Score.
 
-riskEngine should eventually accept both VehicleInput and KnownIssue[] so that it can use known issues as context.
+### `app/api/extract-listing/route.ts`
 
-However, known issues should not strongly increase risk score by themselves.
+Server API route for OpenAI structured extraction.
 
-### 5. data/knownIssues.ts
+Responsibilities:
 
-Current role:
+* Uses `process.env.OPENAI_API_KEY`.
+* Uses `process.env.OPENAI_MODEL`.
+* Accepts raw listing text and relevant request context.
+* Requests structured vehicle details and listing evidence from OpenAI.
+* Returns vehicle data, listing evidence, and an extraction note.
+* Handles errors safely so fallback extraction can be used.
 
-Stores source-backed model-specific inspection priorities for 10 used car models.
+Security rule: never expose `OPENAI_API_KEY` to browser code and never rename it with a `NEXT_PUBLIC_` prefix.
 
-Current dataset direction:
+### `lib/mockExtractor.ts`
 
-The file contains inspection priority data for common used cars in Australia, including models such as:
+Deterministic fallback vehicle extractor.
 
-- Toyota Corolla
-- Toyota Yaris
-- Honda Jazz
-- Honda Civic
-- Mazda 2
-- Mazda 3
-- Hyundai i30
-- Hyundai Getz
-- Kia Cerato
-- Kia Rio
+Responsibilities:
 
-Each known issue entry includes:
+* Extracts likely make, model, year, mileage, price, transmission, fuel type, body style, seller type, service history status, and rego mention.
+* Normalizes common listing language such as `Driven 212k` into `212000`.
+* Keeps the app usable when AI extraction is disabled or unavailable.
 
-- id
-- make
-- model
-- generation
-- yearFrom
-- yearTo
-- area
-- issue
-- whyItMatters
-- howToInspect
-- sellerQuestions
-- severity
-- confidence
-- sourceQuality
-- sourceSummary
-- sourceName
-- sourceUrl
-- verificationStatus
-- wordingCaution
-- optional conditions such as:
-  - appliesToFuelTypes
-  - appliesToTransmissions
-  - appliesToBodyStyles
+### `lib/evidenceExtractor.ts`
 
-Important design decision:
+Deterministic fallback evidence extractor.
 
-The data should be displayed as Model-Specific Inspection Priorities, not as Confirmed Known Faults.
+Responsibilities:
 
-The app should avoid saying that a specific vehicle definitely has a fault unless the listing or user-provided evidence supports it.
+* Detects positive signals.
+* Detects risk signals.
+* Detects missing information.
+* Extracts seller claims.
+* Flags hard red flags such as no RWC, no rego, engine light, overheating, transmission symptoms, urgent sale, cash only, and selling as-is.
+* Treats `no issues` as a seller claim, not verified proof.
 
-### 6. lib/knownIssueMatcher.ts
+### `lib/knownIssueMatcher.ts`
 
-Current or planned role:
+Model-specific inspection priority matcher.
 
-Matches the reviewed VehicleInput against knownIssues.ts.
+Responsibilities:
 
-Expected matching logic:
+* Matches reviewed vehicle details against `data/knownIssues.ts`.
+* Uses make, model, year range, fuel type, transmission, and body style where available.
+* Avoids clearly mismatched records.
+* Allows cautious matching where some attributes are unknown.
 
-1. Match by make.
-2. Match by model.
-3. Match by year range.
-4. Optionally match by fuel type.
-5. Optionally match by transmission.
-6. Optionally match by body style.
-7. Return KnownIssue[].
+Matched known issues are model-specific inspection priorities. They are not confirmed faults unless the listing itself states matching symptoms.
 
-Important matching principle:
+### `lib/riskEngine.ts`
 
-The matcher should avoid overmatching.
+Final rule-based scoring engine.
 
-Examples:
+Responsibilities:
 
-- Manual clutch issue should not appear strongly for an automatic vehicle.
-- Diesel DPF issue should not appear strongly for a confirmed petrol vehicle.
-- Hatchback recall issue should not appear strongly for a confirmed sedan.
-- If fuel type, transmission, or body style is unknown, the app may still show the item, but it should be worded cautiously.
+* Accepts reviewed vehicle details, budget context, listing evidence, and matched known issues.
+* Calculates the final Buying Confidence Score.
+* Produces recommendation, confidence band, summary, top reasons, next steps, detailed risk reasons, seller red flags, missing information, known issue warnings, and required verification checks.
+* Keeps scoring explainable and deterministic.
 
-## Important Design Decisions So Far
+Important: do not move final scoring into OpenAI. AI can assist extraction, but the score must remain rule-based scoring.
 
-### 1. Use a single main conversation for now
+### `lib/types.ts`
 
-For the current MVP stage, the project is easier to manage in one ChatGPT conversation because frontend, risk logic, data design, and architecture are still tightly connected.
+Shared TypeScript data contracts.
 
-Splitting into multiple chats too early may create confusion.
+Responsibilities:
 
-Potential future split after MVP:
+* Defines core shapes such as `VehicleInput`, `ListingEvidence`, `EvidenceSignal`, `ExtractionResult`, `RiskResult`, and `KnownIssue`.
+* Should be inspected before changing cross-component contracts.
 
-- Main Brain / Architecture
-- Code Implementation
-- UI Design
-- AI Integration
-- Portfolio / README
+### `data/knownIssues.ts`
 
-For now, one conversation is preferred.
+Source-backed known issue dataset.
 
-### 2. Keep knownIssues separate from confirmed vehicle risk
+Responsibilities:
 
-KnownIssues should not automatically make a car high risk.
+* Stores model-specific inspection priority records.
+* Includes applicability fields such as make, model, year range, fuel type, transmission, and body style where relevant.
+* Includes inspection guidance, seller questions, source information, confidence/severity metadata, and wording caution.
 
-Correct interpretation:
+## Extraction Logic
 
-KnownIssues = inspection priorities.
+The extraction layer has two sources:
 
-Incorrect interpretation:
+* AI extraction from OpenAI through `app/api/extract-listing/route.ts`.
+* Fallback extraction from `mockExtractor.ts` and `evidenceExtractor.ts`.
 
-KnownIssues = this vehicle definitely has these faults.
+Current behavior:
 
-### 3. knownIssues and riskEngine relationship
+* `NEXT_PUBLIC_USE_AI_EXTRACTION=true` attempts AI extraction.
+* `NEXT_PUBLIC_USE_AI_EXTRACTION=false` skips AI extraction.
+* If AI is unavailable or fails, fallback extraction should still return a usable result.
+* OpenAI extraction and fallback extraction are merged so obvious deterministic signals are not lost.
 
-Accuracy-first approach:
+Examples that should work:
 
-- knownIssues alone:
-  - display as inspection priorities
-  - very small or no direct score impact
+* `Driven 212k` should become mileage `212000`.
+* `Full log book available` should count as service history.
+* `Rego until October` should count as rego mentioned.
+* `no issues` should appear as a seller claim, not verified proof.
 
-- knownIssues + missing service history:
-  - moderate uncertainty warning
+The user can correct extraction mistakes in `ReviewView` before scoring.
 
-- knownIssues + matching symptom in listing:
-  - stronger risk warning
+## Scoring Logic Direction
 
-- knownIssues + official recall:
-  - required VIN verification
+The Buying Confidence Score is a budget-aware screening signal based on listing information, missing information, seller red flags, reviewed vehicle details, and model-specific inspection priorities.
 
-- knownIssues + confirmed unresolved issue:
-  - recommendation escalation
+It should reward or preserve confidence for:
 
-The best long-term structure is:
+* Clear year, make, model, price, and mileage.
+* Service history or log book mention.
+* Rego mention.
+* Reasonable age and mileage for the selected budget range.
+* Transparent seller wording.
 
-VehicleInput → knownIssueMatcher → matchedIssues
+It should reduce confidence for:
 
-VehicleInput + matchedIssues → riskEngine → RiskResult
+* Missing key information.
+* High mileage or age relative to the selected budget.
+* No registration.
+* No roadworthy certificate where expected.
+* Engine light.
+* Overheating.
+* Transmission issues.
+* Selling as-is.
+* Cash-only wording.
+* Urgent sale pressure.
+* Vague or suspicious seller wording.
 
-But inside riskEngine, knownIssues should be treated as context, not direct proof of fault.
+Known issues should have limited score impact unless the listing includes matching symptoms. They should mainly guide inspection questions.
 
-## Current Risk Logic Direction
+The score is not an absolute car quality judgement and should never be presented as proof that a car is safe, unsafe, good, or bad.
 
-The risk system should eventually separate risk into different concepts:
+## Known Issue Handling
 
-### Base Listing Risk
+Use these terms:
 
-Risk from:
+* model-specific inspection priorities
+* inspection priorities
+* not confirmed faults
+* ask the seller
+* check during inspection
 
-- year
-- mileage
-- service history
-- rego
-- price
-- seller wording
+Avoid:
 
-### Information Uncertainty
+* confirmed issue
+* this car has the fault
+* this model is bad
+* guaranteed problem
 
-Risk from:
+Known issue records should be surfaced as targeted checks. For example, if a known issue applies to a model/year range, the UI can recommend asking about that area or having it inspected.
 
-- missing information
-- vague seller description
-- unclear service history
-- unknown transmission
-- unknown fuel type
+## Environment Variables
 
-### Evidence-Based Warnings
+Local development uses `.env.local`:
 
-Risk from actual symptoms in the listing, such as:
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-5.4-nano
+NEXT_PUBLIC_USE_AI_EXTRACTION=false
+```
 
-- engine light
-- rough shifting
-- overheating
-- shudder
-- knocking
-- misfire
-- no RWC
-- selling as is
+Behavior:
 
-### Inspection Priorities
+* `NEXT_PUBLIC_USE_AI_EXTRACTION=true` enables AI extraction through the API route.
+* `NEXT_PUBLIC_USE_AI_EXTRACTION=false` uses fallback extraction.
+* `OPENAI_API_KEY` must stay server-side.
+* `.env.local` must not be committed.
+* Vercel environment variables must be configured separately in Vercel.
+* Restart the dev server after changing environment variables.
 
-Model-specific areas to check based on knownIssues.
+## Troubleshooting Notes
 
-### Required Verification Checks
+### AI extraction is not running
 
-Checks such as:
+Check:
 
-- PPSR
-- VIN
-- recall
-- rego
-- service records
+* `.env.local` exists.
+* `NEXT_PUBLIC_USE_AI_EXTRACTION=true`.
+* `OPENAI_API_KEY` is set.
+* `OPENAI_MODEL` is set to a model the account can access.
+* OpenAI billing/API access is available.
+* The dev server was restarted after changing env vars.
 
-This is more accurate than putting everything into one simple score.
+Fallback mode is expected when `NEXT_PUBLIC_USE_AI_EXTRACTION=false`.
 
-## Current MVP Flow Target
+### API key appears in browser code
 
-The first MVP should complete this flow:
+This is wrong. `OPENAI_API_KEY` belongs only in server-only code such as `app/api/extract-listing/route.ts`. Do not expose it through `NEXT_PUBLIC_`.
 
-1. Paste listing.
-2. Extract VehicleInput.
-3. Review/Edit extracted details.
-4. Match model-specific inspection priorities.
-5. Run quick risk scan.
-6. Show Quick Risk Report.
+### Extraction misses an obvious signal
 
-This should be completed before adding OpenAI, database, login, screenshot upload, or deployment.
+Check:
 
-## Features Not Yet Implemented
+* Whether AI or fallback extraction was used.
+* Whether the raw listing contains noisy marketplace page text.
+* Whether fallback parsing handles the wording.
+* Whether merge logic is preserving deterministic fallback signals.
+* Whether the user can correct the field in `ReviewView`.
 
-Not implemented yet:
+### Score feels too harsh or too generous
 
-- OpenAI API extraction
-- OpenAI final report generation
-- Screenshot upload / OCR / vision
-- Deep Check page
-- PPSR input
-- Rego verification input
-- Service history deep analysis
-- Saved listings
-- Compare listings
-- LocalStorage
-- Database
-- Login
-- Deployment
-- README
-- Portfolio write-up
+Check:
 
-## Next Planned Work
+* Selected budget range.
+* Age and mileage thresholds for that range.
+* Whether hard red flags are double-counted.
+* Whether missing information is being treated as uncertainty rather than proof of a problem.
+* Whether known issues are affecting the score too strongly.
 
-Recommended next steps:
+### Known issues sound like confirmed faults
 
-1. Test the MVP with several real marketplace listings.
-2. Tune score thresholds and wording based on real listing behaviour.
-3. Polish the UI for mobile readability, spacing, and clearer scan states.
-4. Improve or replace README with current MVP setup and usage notes.
-5. Prepare and deploy the app to Vercel.
+Change the wording. They must be described as model-specific inspection priorities and not confirmed faults.
 
-## Current Accuracy Principle
+### App does not progress to the next screen
 
-The project should prioritise cautious and honest analysis.
+Check:
 
-The app should say:
+* `app/page.tsx` state transitions.
+* Extraction errors in the browser console and Next.js terminal.
+* Whether fallback extraction returns a valid result.
+* Whether known issue matching is throwing and blocking progress.
 
-- This is an inspection priority.
-- This should be verified.
-- This may require further checking.
-- This is a risk signal if the symptom is present.
+## Test Listings
 
-The app should avoid saying:
+### Stronger Listing
 
-- This car has this fault.
-- This model is bad.
-- This vehicle is safe.
-- You should definitely buy this car.
+```txt
+2016 Toyota Corolla automatic petrol sedan
+125,000km
+$13,500
+full service history
+rego until December
+drives well
+private sale
+```
 
-## Current Development Rule
+Expected:
 
-Before adding new major features, complete the current MVP flow.
+* Higher Buying Confidence Score.
+* Service history detected.
+* Rego mention detected.
+* Mileage treated against selected budget.
+* Next steps still include verification.
 
-Avoid adding too many features at once.
+### Risky Listing
 
-Preferred development order:
+```txt
+2009 Mazda 3 automatic
+245,000km
+$3,800
+no rwc
+no rego
+engine light on
+urgent sale
+cash only
+selling as is
+```
 
-1. Make the current flow work.
-2. Test with real listings.
-3. Fix extractor issues.
-4. Improve risk logic.
-5. Add Deep Check.
-6. Add OpenAI extraction.
-7. Add save/compare.
-8. Polish UI.
-9. Write README and portfolio explanation.
+Expected:
+
+* Low Buying Confidence Score.
+* Engine light, no RWC, no rego, urgent sale, cash-only, and selling as-is detected.
+* Recommendation cautions the user before spending time or money.
+
+### Merge/Normalization Listing
+
+```txt
+2012 Honda Civic auto. Driven 212k. Full log book available.
+Rego until October. No issues, only selling because upgraded.
+$7,200 ono.
+```
+
+Expected:
+
+* Mileage normalized to `212000`.
+* Service history detected from log book wording.
+* Rego mention detected.
+* `no issues` captured as a seller claim, not verified evidence.
+
+### Missing-Information Listing
+
+```txt
+Toyota Corolla
+good condition
+drives well
+message me for details
+```
+
+Expected:
+
+* Cautious Buying Confidence Score.
+* Missing year, mileage, price, service history, rego, and RWC surfaced.
+* Next steps ask for missing basics before inspection.
+
+## Recommended Next Steps
+
+1. Run fallback-mode tests with the examples above.
+2. Test OpenAI extraction with a real API key and available model.
+3. Tune budget-aware scoring thresholds using real Australian listings under $15,000.
+4. Improve extraction for long marketplace pages with unrelated text.
+5. Expand `data/knownIssues.ts` with more source-backed inspection priorities.
+6. Verify mobile layout for InputView, ReviewView, and ResultView.
+7. Add portfolio screenshots and deployment link to `README.md`.
+8. Configure Vercel environment variables before deployment.
+9. Consider saved listings or comparison only after the core screening flow is stable.
+
+## Development Guidance
+
+When continuing the project:
+
+* Keep changes targeted.
+* Preserve `InputView -> ReviewView -> ResultView`.
+* Preserve the review/edit step before scoring.
+* Keep OpenAI limited to extraction and evidence detection.
+* Keep final scoring rule-based and explainable.
+* Keep known issues as model-specific inspection priorities.
+* Use cautious wording around seller claims and not confirmed faults.
+* Do not commit `.env.local`.
+
+Before changing data contracts, inspect:
+
+* `lib/types.ts`
+* `app/page.tsx`
+* `components/InputView.tsx`
+* `components/ReviewView.tsx`
+* `components/ResultView.tsx`
+* `lib/openaiExtractor.ts`
+* `app/api/extract-listing/route.ts`
+* `lib/riskEngine.ts`
+
+Useful commands:
+
+```bash
+npm run dev
+npm run build
+npm run lint
+```
+
+## Handoff Prompt
+
+Paste this into a new ChatGPT/Codex conversation:
+
+```txt
+You are working on my Next.js + TypeScript project called AutoRisk Insight.
+
+Read README.md and PROJECT_STATE.md first.
+
+AutoRisk Insight is a budget-aware used-car listing screening MVP for Australian buyers. It focuses on affordable listings up to around $15,000. Users select a budget range, paste a raw marketplace listing, review/edit extracted vehicle details, and receive a Buying Confidence Score with short reasons, next steps, and model-specific inspection priorities.
+
+Important rules:
+- Use "Buying Confidence Score".
+- Use "budget-aware screening".
+- Use "extraction layer" and "fallback extraction" when discussing parsing.
+- Treat seller claims as unverified claims.
+- Treat known issues as model-specific inspection priorities, not confirmed faults.
+- Describe the app as an early-stage screening tool, not a final purchase recommendation.
+- OpenAI is used only for extraction and evidence detection.
+- The final score must remain rule-based scoring.
+- If AI extraction is disabled or unavailable, fallback extraction should still work.
+- OpenAI extraction and fallback extraction should be merged so clear deterministic signals are preserved.
+
+Please inspect the current source before making changes, keep edits targeted, and preserve the existing MVP flow: InputView -> ReviewView -> ResultView.
+```
+
+## Disclaimer
+
+AutoRisk Insight does not replace PPSR checks, official recall checks, registration verification, legal advice, service record verification, finance owing checks, stolen vehicle checks, service record verification, or a professional mechanical inspection. It is an early-stage screening tool for budget-aware listing review.

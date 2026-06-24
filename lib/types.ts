@@ -1,5 +1,4 @@
-
-//types.ts는 데이터가 따라야 하는 약속/규칙
+// types.ts는 데이터가 따라야 하는 약속/규칙
 
 export type VehicleInput = {
   make: string;
@@ -16,6 +15,51 @@ export type VehicleInput = {
   sellerDescription: string;
   rawListingText: string;
   extractionMethod: "mock" | "regex" | "openai" | "manual";
+};
+
+export type BudgetRange =
+  | "not_sure"
+  | "under_5000"
+  | "5000_8000"
+  | "8000_11000"
+  | "11000_15000";
+
+export type BuyerProfile = {
+  budgetRange: BudgetRange;
+};
+
+export type EvidenceCategory =
+  | "engine"
+  | "transmission"
+  | "rego"
+  | "rwc"
+  | "service_history"
+  | "accident"
+  | "seller_pressure"
+  | "price"
+  | "mileage"
+  | "other";
+
+export type EvidenceSeverity = "low" | "medium" | "high";
+
+export type EvidenceSignal = {
+  category: EvidenceCategory;
+  evidenceText: string;
+  severity: EvidenceSeverity;
+  explanation: string;
+};
+
+export type ListingEvidence = {
+  positiveSignals: string[];
+  riskSignals: EvidenceSignal[];
+  missingInformation: string[];
+  sellerClaims: string[];
+};
+
+export type ExtractionResult = {
+  vehicle: VehicleInput;
+  evidence: ListingEvidence;
+  extractionNote: string;
 };
 
 export type Recommendation =
@@ -43,6 +87,12 @@ export type RiskResult = {
 
   confidenceBand: ConfidenceBand;
 
+  // Clean user-facing result.
+  summary: string;
+  topReasons: string[];
+  nextSteps: string[];
+
+  // Detailed / secondary information.
   riskReasons: string[];
   missingInformation: string[];
   sellerRedFlags: string[];

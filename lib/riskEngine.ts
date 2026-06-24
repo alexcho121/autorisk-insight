@@ -1,13 +1,31 @@
+// lib/riskEngine.ts
+// Budget-aware Buying Confidence Score.
+// AI/fallback evidence는 보조 근거로만 사용하고, 최종 점수는 rule-based로 계산합니다.
+
 import {
+  BudgetRange,
+  BuyerProfile,
+  ConfidenceBand,
   KnownIssue,
+  ListingEvidence,
   Recommendation,
   RiskResult,
   VehicleInput,
 } from "./types";
 
+type BudgetExpectation = {
+  typicalMaxAge: number;
+  cautionAge: number;
+  typicalMaxMileage: number;
+  cautionMileage: number;
+  strictness: number;
+};
+
 export function analyseQuickRisk(
   vehicle: VehicleInput,
-  matchedIssues: KnownIssue[] = []
+  matchedIssues: KnownIssue[] = [],
+  evidence: ListingEvidence | null = null,
+  buyerProfile: BuyerProfile = { budgetRange: "not_sure" }
 ): RiskResult {
   let riskPenaltyScore = 0;
 
@@ -15,432 +33,728 @@ export function analyseQuickRisk(
   const missingInformation: string[] = [];
   const sellerRedFlags: string[] = [];
   const knownIssueWarnings: string[] = [];
-  const requiredVerificationChecks: string[] = [];
+  const requiredVerificationChecks: string[] = [
+    "Run a PPSR check before purchase.",
+    "Verify VIN, rego status, and written service records.",
+    "Get a professional mechanical inspection before buying.",
+  ];
 
-  if (vehicle.make === "Unknown") {
-    riskPenaltyScore += 10;
-    missingInformation.push("Vehicle make is not clearly mentioned.");
+  const positiveReasons: string[] = [];
+  const cautionReasons: string[] = [];
+
+  const appliedPenaltyKeys = new Set<string>();
+  const handledEvidenceCategories = new Set<string>();
+  const scoreCaps: number[] = [];
+
+  const currentYear = new Date().getFullYear();
+  const rawDescription = vehicle.sellerDescription || vehicle.rawListingText || "";
+  const lowerDescription = rawDescription.toLowerCase();
+
+  const budgetExpectation = getBudgetExpectation(buyerProfile.budgetRange);
+  const budgetLabel = getBudgetRangeLabel(buyerProfile.budgetRange);
+
+  function addPenalty(
+    key: string,
+    amount: number,
+    message: string,
+    options?: {
+      missing?: boolean;
+      sellerFlag?: boolean;
+      riskReason?: boolean;
+      evidenceCategory?: string;
+      capScoreAt?: number;
+    }
+  ) {
+    if (appliedPenaltyKeys.has(key)) {
+      return;
+    }
+
+    appliedPenaltyKeys.add(key);
+    riskPenaltyScore += amount;
+
+    if (options?.missing) {
+      missingInformation.push(message);
+    }
+
+    if (options?.sellerFlag) {
+      sellerRedFlags.push(message);
+    }
+
+    if (options?.riskReason) {
+      riskReasons.push(message);
+    }
+
+    cautionReasons.push(message);
+
+    if (options?.evidenceCategory) {
+      handledEvidenceCategories.add(options.evidenceCategory);
+    }
+
+    if (options?.capScoreAt !== undefined) {
+      scoreCaps.push(options.capScoreAt);
+    }
   }
 
-  if (vehicle.model === "Unknown") {
-    riskPenaltyScore += 10;
-    missingInformation.push("Vehicle model is not clearly mentioned.");
+  function addPositive(message: string) {
+    positiveReasons.push(message);
   }
 
-  if (!vehicle.year) {
-    riskPenaltyScore += 10;
-    missingInformation.push("Vehicle year is not clearly mentioned.");
-  } else if (vehicle.year < 2008) {
-    riskPenaltyScore += 20;
-    riskReasons.push("The vehicle is relatively old.");
-  } else if (vehicle.year < 2012) {
-    riskPenaltyScore += 10;
-    riskReasons.push("The vehicle is over 10 years old.");
+  // 1. Basic identity checks
+  if (isUnknown(vehicle.make)) {
+    addPenalty("missing_make", 10, "Vehicle make is not clearly identified.", {
+      missing: true,
+    });
   }
 
-  if (!vehicle.mileage) {
-    riskPenaltyScore += 15;
-    missingInformation.push("Mileage is not clearly mentioned.");
-  } else if (vehicle.mileage > 220000) {
-    riskPenaltyScore += 30;
-    riskReasons.push("Mileage is very high.");
-  } else if (vehicle.mileage > 160000) {
-    riskPenaltyScore += 15;
-    riskReasons.push("Mileage is moderately high.");
+  if (isUnknown(vehicle.model)) {
+    addPenalty("missing_model", 10, "Vehicle model is not clearly identified.", {
+      missing: true,
+    });
   }
 
-  if (!vehicle.price) {
-    riskPenaltyScore += 10;
-    missingInformation.push("Price is not clearly mentioned.");
+  // 2. Budget-aware vehicle age
+  if (vehicle.year === null) {
+    addPenalty(
+      "missing_year",
+      Math.round(10 * budgetExpectation.strictness),
+      "Vehicle year is not clearly stated.",
+      {
+        missing: true,
+      }
+    );
+  } else {
+    const vehicleAge = currentYear - vehicle.year;
+
+    if (vehicleAge > budgetExpectation.cautionAge) {
+      addPenalty(
+        "age_high_for_budget",
+        Math.round(18 * budgetExpectation.strictness),
+        `The vehicle is older than expected for the ${budgetLabel} budget range.`,
+        {
+          riskReason: true,
+        }
+      );
+    } else if (vehicleAge > budgetExpectation.typicalMaxAge) {
+      addPenalty(
+        "age_caution_for_budget",
+        Math.round(9 * budgetExpectation.strictness),
+        `Vehicle age is a caution point for the ${budgetLabel} budget range.`,
+        {
+          riskReason: true,
+        }
+      );
+    } else {
+      addPositive(
+        `Vehicle age looks reasonable for the ${budgetLabel} budget range.`
+      );
+    }
   }
 
-  if (vehicle.transmission === "Unknown") {
-    riskPenaltyScore += 5;
-    missingInformation.push("Transmission type is not clearly mentioned.");
-  }
-
-  if (vehicle.fuelType === "Unknown") {
-    missingInformation.push("Fuel type is not clearly mentioned.");
-  }
-
-  if (vehicle.bodyStyle === "Unknown") {
-    missingInformation.push("Body style is not clearly mentioned.");
-  }
-
-  if (vehicle.sellerType === "Unknown") {
-    missingInformation.push("Seller type is not clearly identified.");
-  }
-
-  if (vehicle.serviceHistoryStatus === "Not mentioned") {
-    riskPenaltyScore += 15;
-    missingInformation.push("Service history is not mentioned.");
-  }
-
-  if (!vehicle.regoMentioned) {
-    riskPenaltyScore += 10;
-    missingInformation.push("Rego status is not mentioned.");
-  }
-
-  const lowerDescription = vehicle.sellerDescription.toLowerCase();
-
-  if (lowerDescription.includes("selling as is")) {
-    riskPenaltyScore += 20;
-    sellerRedFlags.push("Seller uses 'selling as is'.");
-  }
-
-  if (lowerDescription.includes("no rwc")) {
-    riskPenaltyScore += 20;
-    sellerRedFlags.push("No roadworthy certificate is mentioned.");
-  }
-
-  if (lowerDescription.includes("engine light")) {
-    riskPenaltyScore += 30;
-    sellerRedFlags.push("Engine warning light is mentioned.");
-  }
-
-  if (lowerDescription.includes("urgent sale")) {
-    riskPenaltyScore += 10;
-    sellerRedFlags.push("Urgent sale may require extra caution.");
-  }
-
-  if (lowerDescription.includes("cash only")) {
-    riskPenaltyScore += 10;
-    sellerRedFlags.push("Cash-only sale may require extra caution.");
-  }
-
-  const knownIssueContextPenalty =
-    calculateKnownIssueContextPenalty(matchedIssues);
-
-  if (knownIssueContextPenalty > 0) {
-    riskPenaltyScore += knownIssueContextPenalty;
-
-    knownIssueWarnings.push(
-      `This vehicle has ${matchedIssues.length} model-specific inspection priority item(s). These are not confirmed faults, but they should be checked before purchase.`
+  // 3. Budget-aware mileage
+  if (vehicle.mileage === null) {
+    addPenalty(
+      "missing_mileage",
+      Math.round(15 * budgetExpectation.strictness),
+      "Mileage is not clearly stated.",
+      {
+        missing: true,
+      }
+    );
+  } else if (vehicle.mileage > budgetExpectation.cautionMileage) {
+    addPenalty(
+      "mileage_high_for_budget",
+      Math.round(25 * budgetExpectation.strictness),
+      `Mileage is very high for the ${budgetLabel} budget range.`,
+      {
+        riskReason: true,
+      }
+    );
+  } else if (vehicle.mileage > budgetExpectation.typicalMaxMileage) {
+    addPenalty(
+      "mileage_caution_for_budget",
+      Math.round(13 * budgetExpectation.strictness),
+      `Mileage is a caution point for the ${budgetLabel} budget range.`,
+      {
+        riskReason: true,
+      }
+    );
+  } else {
+    addPositive(
+      `Mileage looks reasonable for the ${budgetLabel} budget range.`
     );
   }
 
-  const recallIssueCount = countRecallIssues(matchedIssues);
+  // 4. Price checks
+  if (vehicle.price === null) {
+    addPenalty("missing_price", 8, "Price is not clearly stated.", {
+      missing: true,
+    });
+  } else if (vehicle.price < 1500) {
+    addPenalty(
+      "price_unusually_low",
+      12,
+      "The price appears unusually low and should be checked carefully.",
+      {
+        riskReason: true,
+        capScoreAt: 72,
+      }
+    );
+  } else if (vehicle.price > 15000) {
+    addPenalty(
+      "price_above_target_budget",
+      6,
+      "This app is mainly designed for affordable used-car listings up to around $15,000.",
+      {
+        riskReason: true,
+      }
+    );
+  } else {
+    addPositive("Price is clearly stated.");
+  }
 
-  if (recallIssueCount > 0) {
-    riskPenaltyScore += 5;
+  const priceSuspicion = detectPriceSuspicion(vehicle);
 
-    requiredVerificationChecks.push(
-      "Official recall status should be checked by VIN before purchase."
+  if (priceSuspicion) {
+    addPenalty("price_suspicious_for_vehicle", 12, priceSuspicion, {
+      riskReason: true,
+      capScoreAt: 72,
+    });
+  }
+
+  // 5. Transmission / fuel / body style
+  if (isUnknown(vehicle.transmission)) {
+    addPenalty(
+      "missing_transmission",
+      5,
+      "Transmission type is not clearly stated.",
+      {
+        missing: true,
+      }
+    );
+  }
+
+  if (isUnknown(vehicle.fuelType)) {
+    missingInformation.push("Fuel type is not clearly stated.");
+  }
+
+  if (isUnknown(vehicle.bodyStyle)) {
+    missingInformation.push("Body style is not clearly stated.");
+  }
+
+  // 6. Service history
+  if (vehicle.serviceHistoryStatus === "Full service history mentioned") {
+    addPositive("Full service history is mentioned.");
+  } else if (vehicle.serviceHistoryStatus === "Service history mentioned") {
+    addPositive("Service history is mentioned.");
+  } else if (vehicle.serviceHistoryStatus === "No service history mentioned") {
+    addPenalty(
+      "no_service_history",
+      Math.round(20 * budgetExpectation.strictness),
+      "The listing suggests there may be no clear service history.",
+      {
+        riskReason: true,
+        evidenceCategory: "service_history",
+      }
+    );
+  } else {
+    addPenalty(
+      "missing_service_history",
+      Math.round(12 * budgetExpectation.strictness),
+      "Service history is not clearly mentioned.",
+      {
+        missing: true,
+        evidenceCategory: "service_history",
+      }
+    );
+  }
+
+  // 7. Rego and RWC
+  const noRegoMentioned = hasAny(lowerDescription, [
+    "no rego",
+    "rego expired",
+    "expired rego",
+  ]);
+
+  if (noRegoMentioned) {
+    addPenalty(
+      "no_rego",
+      16,
+      "The listing suggests rego may be missing or expired.",
+      {
+        sellerFlag: true,
+        evidenceCategory: "rego",
+        capScoreAt: 60,
+      }
+    );
+  } else if (vehicle.regoMentioned) {
+    addPositive("Rego is mentioned in the listing.");
+  } else {
+    addPenalty(
+      "missing_rego",
+      8,
+      "Rego status is not clearly mentioned.",
+      {
+        missing: true,
+        evidenceCategory: "rego",
+      }
+    );
+  }
+
+  const noRwcMentioned = hasAny(lowerDescription, [
+    "no rwc",
+    "without rwc",
+    "no roadworthy",
+    "without roadworthy",
+  ]);
+
+  if (noRwcMentioned) {
+    addPenalty(
+      "no_rwc",
+      12,
+      "RWC status is a caution point and should be confirmed before inspection.",
+      {
+        sellerFlag: true,
+        evidenceCategory: "rwc",
+        capScoreAt: 72,
+      }
+    );
+  } else if (
+    hasAny(lowerDescription, [
+      "rwc supplied",
+      "rwc included",
+      "roadworthy supplied",
+      "roadworthy included",
+      "comes with rwc",
+      "with rwc",
+    ])
+  ) {
+    addPositive("RWC is mentioned as available or included.");
+  } else {
+    missingInformation.push("RWC status is not clearly mentioned.");
+  }
+
+  // 8. Seller and mechanical red flags
+  if (hasAny(lowerDescription, ["selling as is", "sold as is", "as-is"])) {
+    addPenalty("selling_as_is", 18, "The listing uses as-is sale wording.", {
+      sellerFlag: true,
+      evidenceCategory: "seller_pressure",
+      capScoreAt: 58,
+    });
+  }
+
+  if (
+    hasAny(lowerDescription, ["engine light", "check engine", "warning light"])
+  ) {
+    addPenalty(
+      "engine_light",
+      30,
+      "The listing mentions a warning light or engine light.",
+      {
+        sellerFlag: true,
+        evidenceCategory: "engine",
+        capScoreAt: 40,
+      }
     );
   }
 
   if (
-    hasMaintenanceSensitiveIssue(matchedIssues) &&
-    vehicle.serviceHistoryStatus === "Not mentioned"
+    hasAny(lowerDescription, [
+      "transmission slipping",
+      "rough shifting",
+      "gearbox issue",
+      "gearbox problem",
+      "transmission issue",
+      "transmission problem",
+      "shudder",
+    ])
   ) {
-    riskPenaltyScore += 10;
+    addPenalty(
+      "transmission_symptom",
+      26,
+      "The listing mentions a possible transmission or gearbox concern.",
+      {
+        sellerFlag: true,
+        evidenceCategory: "transmission",
+        capScoreAt: 45,
+      }
+    );
+  }
+
+  if (hasAny(lowerDescription, ["overheating", "over heats", "overheat"])) {
+    addPenalty(
+      "overheating",
+      28,
+      "The listing mentions a possible overheating concern.",
+      {
+        sellerFlag: true,
+        evidenceCategory: "engine",
+        capScoreAt: 42,
+      }
+    );
+  }
+
+  if (hasAny(lowerDescription, ["urgent sale", "must sell"])) {
+    addPenalty(
+      "urgent_sale",
+      5,
+      "The seller uses urgency wording, so avoid rushing the decision.",
+      {
+        sellerFlag: true,
+        evidenceCategory: "seller_pressure",
+      }
+    );
+  }
+
+  if (hasAny(lowerDescription, ["cash only"])) {
+    addPenalty("cash_only", 6, "The listing uses cash-only wording.", {
+      sellerFlag: true,
+      evidenceCategory: "seller_pressure",
+    });
+  }
+
+  if (appliedPenaltyKeys.has("no_rwc") && appliedPenaltyKeys.has("urgent_sale")) {
+    scoreCaps.push(68);
+  }
+
+  if (appliedPenaltyKeys.has("cash_only") && appliedPenaltyKeys.has("urgent_sale")) {
+    scoreCaps.push(66);
+  }
+
+  // 9. AI/fallback evidence
+  if (evidence) {
+    for (let i = 0; i < evidence.positiveSignals.length; i++) {
+      positiveReasons.push(cleanSentence(evidence.positiveSignals[i]));
+    }
+
+    for (let i = 0; i < evidence.missingInformation.length; i++) {
+      const item = cleanSentence(evidence.missingInformation[i]);
+
+      if (!includesSimilar(missingInformation, item)) {
+        missingInformation.push(item);
+      }
+    }
+
+    for (let i = 0; i < evidence.riskSignals.length; i++) {
+      const signal = evidence.riskSignals[i];
+
+      if (handledEvidenceCategories.has(signal.category)) {
+        continue;
+      }
+
+      const reason = cleanSentence(signal.explanation || signal.evidenceText);
+
+      if (signal.severity === "high") {
+        addPenalty(`evidence_${signal.category}`, 18, reason, {
+          sellerFlag: true,
+          evidenceCategory: signal.category,
+          capScoreAt: getEvidenceScoreCap(signal.category),
+        });
+      } else if (signal.severity === "medium") {
+        addPenalty(`evidence_${signal.category}`, 10, reason, {
+          sellerFlag: true,
+          evidenceCategory: signal.category,
+          capScoreAt: getEvidenceScoreCap(signal.category),
+        });
+      } else {
+        addPenalty(`evidence_${signal.category}`, 5, reason, {
+          sellerFlag: true,
+          evidenceCategory: signal.category,
+        });
+      }
+    }
+  }
+
+  // 10. Known issues: small score impact, mostly inspection guidance
+  if (matchedIssues.length > 0) {
+    const highSeverityCount = matchedIssues.filter(
+      (issue) => issue.severity === "High"
+    ).length;
+
+    const mediumSeverityCount = matchedIssues.filter(
+      (issue) => issue.severity === "Medium"
+    ).length;
+
+    const knownIssuePenalty = Math.min(
+      highSeverityCount * 2 + mediumSeverityCount,
+      5
+    );
+
+    riskPenaltyScore += knownIssuePenalty;
 
     knownIssueWarnings.push(
-      "This vehicle has maintenance-sensitive inspection priorities, but service history is not clearly mentioned."
+      `${matchedIssues.length} model-specific inspection priority item(s) matched this vehicle. These are not confirmed faults.`
+    );
+
+    cautionReasons.push(
+      "There are model-specific inspection priorities to check."
     );
   }
 
-  const symptomWarnings = detectKnownIssueSymptoms(
-    lowerDescription,
-    matchedIssues
-  );
+  // 11. Final score and caps
+  riskPenaltyScore = Math.min(Math.max(riskPenaltyScore, 0), 100);
 
-  for (let i = 0; i < symptomWarnings.length; i++) {
-    riskPenaltyScore += 20;
-    sellerRedFlags.push(symptomWarnings[i]);
-    knownIssueWarnings.push(symptomWarnings[i]);
+  let buyingConfidenceScore = 100 - riskPenaltyScore;
+
+  if (scoreCaps.length > 0) {
+    buyingConfidenceScore = Math.min(buyingConfidenceScore, Math.min(...scoreCaps));
   }
 
-  if (missingInformation.length >= 3) {
-    requiredVerificationChecks.push(
-      "Ask the seller to confirm the missing vehicle details before inspection."
-    );
-  }
+  buyingConfidenceScore = Math.min(Math.max(buyingConfidenceScore, 0), 100);
+  riskPenaltyScore = 100 - buyingConfidenceScore;
 
-  if (vehicle.serviceHistoryStatus === "Not mentioned") {
-    requiredVerificationChecks.push(
-      "Ask for service records, logbooks, or recent maintenance receipts."
-    );
-  }
+  const confidenceBand = getConfidenceBand(buyingConfidenceScore);
+  const recommendation = getRecommendation(buyingConfidenceScore);
 
-  const finalRiskPenaltyScore = Math.min(riskPenaltyScore, 100);
-  const buyingConfidenceScore = 100 - finalRiskPenaltyScore;
+  const topReasons = buildTopReasons(positiveReasons, cautionReasons);
+  const nextSteps = buildNextSteps(vehicle, evidence, matchedIssues);
+  const summary = buildSummary(buyingConfidenceScore, buyerProfile.budgetRange);
 
   return {
-    recommendation: getRecommendation(
-      buyingConfidenceScore,
-      missingInformation,
-      sellerRedFlags,
-      requiredVerificationChecks
-    ),
-    riskPenaltyScore: finalRiskPenaltyScore,
+    recommendation,
+    riskPenaltyScore,
     buyingConfidenceScore,
-    confidenceBand: getConfidenceBand(buyingConfidenceScore),
-    riskReasons: removeDuplicateStrings(riskReasons),
-    missingInformation: removeDuplicateStrings(missingInformation),
-    sellerRedFlags: removeDuplicateStrings(sellerRedFlags),
-    knownIssueWarnings: removeDuplicateStrings(knownIssueWarnings),
-    requiredVerificationChecks: removeDuplicateStrings(
-      requiredVerificationChecks
-    ),
+    confidenceBand,
+    summary,
+    topReasons,
+    nextSteps,
+    riskReasons: uniqueList(riskReasons),
+    missingInformation: uniqueList(missingInformation),
+    sellerRedFlags: uniqueList(sellerRedFlags),
+    knownIssueWarnings: uniqueList(knownIssueWarnings),
+    requiredVerificationChecks,
   };
 }
 
-function getRecommendation(
-  buyingConfidenceScore: number,
-  missingInformation: string[],
-  sellerRedFlags: string[],
-  requiredVerificationChecks: string[]
-): Recommendation {
-  if (buyingConfidenceScore <= 30) {
-    return "Avoid";
-  }
-
-  if (sellerRedFlags.length >= 3) {
-    return "Avoid";
-  }
-
-  if (buyingConfidenceScore <= 45) {
-    return "Do Not Proceed Yet";
-  }
-
-  if (sellerRedFlags.length >= 2) {
-    return "Do Not Proceed Yet";
-  }
-
-  if (buyingConfidenceScore <= 65) {
-    return "Inspect Carefully";
-  }
-
-  if (
-    missingInformation.length >= 3 ||
-    requiredVerificationChecks.length >= 2
-  ) {
-    return "Ask Before Inspection";
-  }
-
-  return "Worth Shortlisting";
-}
-
-function getConfidenceBand(buyingConfidenceScore: number) {
-  if (buyingConfidenceScore >= 81) {
+function getConfidenceBand(score: number): ConfidenceBand {
+  if (score >= 81) {
     return "Strong Candidate";
   }
 
-  if (buyingConfidenceScore >= 66) {
+  if (score >= 66) {
     return "Good but Check";
   }
 
-  if (buyingConfidenceScore >= 46) {
+  if (score >= 46) {
     return "Caution";
   }
 
-  if (buyingConfidenceScore >= 31) {
+  if (score >= 31) {
     return "High Caution";
   }
 
   return "Avoid for Now";
 }
 
-function calculateKnownIssueContextPenalty(
-  matchedIssues: KnownIssue[]
-): number {
-  if (matchedIssues.length === 0) {
-    return 0;
+function getRecommendation(score: number): Recommendation {
+  if (score >= 81) {
+    return "Worth Shortlisting";
   }
 
-  let penalty = 0;
-
-  for (let i = 0; i < matchedIssues.length; i++) {
-    const issue = matchedIssues[i];
-
-    if (issue.severity === "High") {
-      penalty += 2;
-    } else if (issue.severity === "Medium") {
-      penalty += 1;
-    }
+  if (score >= 66) {
+    return "Ask Before Inspection";
   }
 
-  return Math.min(penalty, 5);
+  if (score >= 46) {
+    return "Inspect Carefully";
+  }
+
+  if (score >= 31) {
+    return "Do Not Proceed Yet";
+  }
+
+  return "Avoid";
 }
 
-function countRecallIssues(matchedIssues: KnownIssue[]): number {
-  let count = 0;
+function buildSummary(score: number, budgetRange: BudgetRange): string {
+  const budgetLabel = getBudgetRangeLabel(budgetRange);
 
-  for (let i = 0; i < matchedIssues.length; i++) {
-    const issue = matchedIssues[i];
-
-    if (
-      issue.sourceQuality === "official-recall" ||
-      issue.area.toLowerCase().includes("recall")
-    ) {
-      count++;
-    }
+  if (score >= 81) {
+    return `This listing looks promising for the ${budgetLabel} budget range, but key details should still be verified before purchase.`;
   }
 
-  return count;
-}
-
-function hasMaintenanceSensitiveIssue(matchedIssues: KnownIssue[]): boolean {
-  for (let i = 0; i < matchedIssues.length; i++) {
-    const issue = matchedIssues[i];
-
-    const combinedText = (
-      issue.area +
-      " " +
-      issue.issue +
-      " " +
-      issue.whyItMatters
-    ).toLowerCase();
-
-    if (
-      combinedText.includes("service") ||
-      combinedText.includes("timing belt") ||
-      combinedText.includes("oil") ||
-      combinedText.includes("cooling") ||
-      combinedText.includes("maintenance") ||
-      combinedText.includes("dpf") ||
-      combinedText.includes("diesel")
-    ) {
-      return true;
-    }
+  if (score >= 66) {
+    return `This listing looks reasonably promising for the ${budgetLabel} budget range, but a few details should be confirmed before booking an inspection.`;
   }
 
-  return false;
+  if (score >= 46) {
+    return `This listing may still be a realistic candidate for the ${budgetLabel} budget range, but it needs careful checks before proceeding.`;
+  }
+
+  if (score >= 31) {
+    return `This listing has several caution signals even for the ${budgetLabel} budget range. Ask questions first and avoid committing before proper verification.`;
+  }
+
+  return `This listing has strong risk signals or too much uncertainty for the ${budgetLabel} budget range. It is safer to avoid it for now unless the seller can provide strong evidence.`;
 }
 
-function detectKnownIssueSymptoms(
-  lowerDescription: string,
+function buildTopReasons(
+  positiveReasons: string[],
+  cautionReasons: string[]
+): string[] {
+  const reasons: string[] = [];
+
+  const uniqueCautions = uniqueList(cautionReasons);
+  const uniquePositives = uniqueList(positiveReasons);
+
+  for (let i = 0; i < uniqueCautions.length && reasons.length < 4; i++) {
+    reasons.push(uniqueCautions[i]);
+  }
+
+  for (let i = 0; i < uniquePositives.length && reasons.length < 5; i++) {
+    reasons.push(uniquePositives[i]);
+  }
+
+  if (reasons.length === 0) {
+    reasons.push("The score is based on the information available in the listing.");
+  }
+
+  return reasons.slice(0, 5);
+}
+
+function buildNextSteps(
+  vehicle: VehicleInput,
+  evidence: ListingEvidence | null,
   matchedIssues: KnownIssue[]
 ): string[] {
-  const warnings: string[] = [];
+  const nextSteps: string[] = [];
 
-  for (let i = 0; i < matchedIssues.length; i++) {
-    const issue = matchedIssues[i];
-
-    const area = issue.area.toLowerCase();
-    const issueText = issue.issue.toLowerCase();
-
-    if (
-      isTransmissionRelated(area, issueText) &&
-      containsAny(lowerDescription, [
-        "transmission issue",
-        "gear issue",
-        "rough shift",
-        "rough shifting",
-        "delayed shift",
-        "slipping",
-        "shudder",
-        "gearbox",
-        "clutch slipping",
-      ])
-    ) {
-      warnings.push(
-        `The listing mentions possible transmission-related symptoms that overlap with a model-specific inspection priority: ${issue.area}.`
-      );
-    }
-
-    if (
-      isEngineRelated(area, issueText) &&
-      containsAny(lowerDescription, [
-        "engine light",
-        "check engine",
-        "misfire",
-        "rough idle",
-        "rattle",
-        "ticking",
-        "knocking",
-        "overheating",
-        "oil leak",
-        "smoke",
-      ])
-    ) {
-      warnings.push(
-        `The listing mentions possible engine-related symptoms that overlap with a model-specific inspection priority: ${issue.area}.`
-      );
-    }
-
-    if (
-      isSuspensionRelated(area, issueText) &&
-      containsAny(lowerDescription, [
-        "suspension noise",
-        "knocking noise",
-        "rattle",
-        "thump",
-        "clunk",
-        "front end noise",
-        "uneven tyre wear",
-      ])
-    ) {
-      warnings.push(
-        `The listing mentions possible suspension or front-end symptoms that overlap with a model-specific inspection priority: ${issue.area}.`
-      );
-    }
-
-    if (
-      isRecallRelated(issue) &&
-      containsAny(lowerDescription, [
-        "recall not done",
-        "recall outstanding",
-        "airbag light",
-        "airbag warning",
-        "fuel pump issue",
-        "child lock issue",
-      ])
-    ) {
-      warnings.push(
-        "The listing mentions recall-related terms. Official recall status should be verified by VIN before purchase."
-      );
-    }
+  if (
+    vehicle.serviceHistoryStatus === "Not mentioned" ||
+    vehicle.serviceHistoryStatus === "No service history mentioned"
+  ) {
+    nextSteps.push("Ask the seller for written service records.");
+  } else {
+    nextSteps.push("Ask the seller to provide the service records before inspection.");
   }
 
-  return removeDuplicateStrings(warnings);
+  if (!vehicle.regoMentioned) {
+    nextSteps.push("Confirm current rego status before booking an inspection.");
+  } else {
+    nextSteps.push("Verify rego, VIN, and PPSR before purchase.");
+  }
+
+  const hasRwcRisk =
+    evidence?.riskSignals.some((signal) => signal.category === "rwc") ?? false;
+
+  if (hasRwcRisk) {
+    nextSteps.push("Confirm whether a current RWC will be provided.");
+  } else {
+    nextSteps.push("Ask whether a current RWC is available.");
+  }
+
+  if (matchedIssues.length > 0) {
+    nextSteps.push("Use the model-specific inspection priorities during the test drive.");
+  }
+
+  return uniqueList(nextSteps).slice(0, 3);
 }
 
-function isTransmissionRelated(area: string, issueText: string): boolean {
-  return (
-    area.includes("transmission") ||
-    area.includes("cvt") ||
-    area.includes("clutch") ||
-    area.includes("gearbox") ||
-    issueText.includes("shudder") ||
-    issueText.includes("shifting") ||
-    issueText.includes("gear")
-  );
+function getBudgetExpectation(budgetRange: BudgetRange): BudgetExpectation {
+  const expectations: Record<BudgetRange, BudgetExpectation> = {
+    not_sure: {
+      typicalMaxAge: 14,
+      cautionAge: 18,
+      typicalMaxMileage: 180000,
+      cautionMileage: 240000,
+      strictness: 1.0,
+    },
+    under_5000: {
+      typicalMaxAge: 20,
+      cautionAge: 24,
+      typicalMaxMileage: 230000,
+      cautionMileage: 290000,
+      strictness: 0.7,
+    },
+    "5000_8000": {
+      typicalMaxAge: 17,
+      cautionAge: 21,
+      typicalMaxMileage: 215000,
+      cautionMileage: 270000,
+      strictness: 0.85,
+    },
+    "8000_11000": {
+      typicalMaxAge: 15,
+      cautionAge: 19,
+      typicalMaxMileage: 190000,
+      cautionMileage: 245000,
+      strictness: 1.0,
+    },
+    "11000_15000": {
+      typicalMaxAge: 12,
+      cautionAge: 16,
+      typicalMaxMileage: 160000,
+      cautionMileage: 220000,
+      strictness: 1.15,
+    },
+  };
+
+  return expectations[budgetRange];
 }
 
-function isEngineRelated(area: string, issueText: string): boolean {
-  return (
-    area.includes("engine") ||
-    area.includes("ignition") ||
-    area.includes("timing") ||
-    area.includes("cooling") ||
-    area.includes("dpf") ||
-    issueText.includes("misfire") ||
-    issueText.includes("rattle") ||
-    issueText.includes("oil") ||
-    issueText.includes("overheating")
-  );
+function getBudgetRangeLabel(budgetRange: BudgetRange): string {
+  if (budgetRange === "under_5000") {
+    return "under $5,000";
+  }
+
+  if (budgetRange === "5000_8000") {
+    return "$5,000–$8,000";
+  }
+
+  if (budgetRange === "8000_11000") {
+    return "$8,000–$11,000";
+  }
+
+  if (budgetRange === "11000_15000") {
+    return "$11,000–$15,000";
+  }
+
+  return "unsure";
 }
 
-function isSuspensionRelated(area: string, issueText: string): boolean {
-  return (
-    area.includes("suspension") ||
-    area.includes("front") ||
-    issueText.includes("rattle") ||
-    issueText.includes("thump") ||
-    issueText.includes("bush")
-  );
+function detectPriceSuspicion(vehicle: VehicleInput): string | null {
+  if (vehicle.price === null || vehicle.year === null || vehicle.mileage === null) {
+    return null;
+  }
+
+  const currentYear = new Date().getFullYear();
+  const age = currentYear - vehicle.year;
+
+  if (age <= 5 && vehicle.mileage < 90000 && vehicle.price < 9000) {
+    return "The price appears unusually low for a newer, lower-mileage vehicle. Verify PPSR, VIN, and seller details carefully.";
+  }
+
+  if (age <= 8 && vehicle.mileage < 130000 && vehicle.price < 6500) {
+    return "The price appears unusually low for the age and mileage. Check for accident history, finance owing, or repair needs.";
+  }
+
+  return null;
 }
 
-function isRecallRelated(issue: KnownIssue): boolean {
-  return (
-    issue.sourceQuality === "official-recall" ||
-    issue.area.toLowerCase().includes("recall")
-  );
+function getEvidenceScoreCap(category: string): number | undefined {
+  if (category === "engine") {
+    return 42;
+  }
+
+  if (category === "transmission") {
+    return 45;
+  }
+
+  if (category === "rego") {
+    return 60;
+  }
+
+  if (category === "rwc") {
+    return 72;
+  }
+
+  if (category === "seller_pressure") {
+    return 68;
+  }
+
+  return undefined;
 }
 
-function containsAny(text: string, keywords: string[]): boolean {
+function hasAny(text: string, keywords: string[]): boolean {
   for (let i = 0; i < keywords.length; i++) {
     if (text.includes(keywords[i])) {
       return true;
@@ -450,14 +764,52 @@ function containsAny(text: string, keywords: string[]): boolean {
   return false;
 }
 
-function removeDuplicateStrings(items: string[]): string[] {
-  const uniqueItems: string[] = [];
+function isUnknown(value: string): boolean {
+  return value.trim().length === 0 || value.toLowerCase() === "unknown";
+}
+
+function cleanSentence(value: string): string {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  if (
+    trimmed.endsWith(".") ||
+    trimmed.endsWith("!") ||
+    trimmed.endsWith("?")
+  ) {
+    return trimmed;
+  }
+
+  return `${trimmed}.`;
+}
+
+function uniqueList(items: string[]): string[] {
+  const result: string[] = [];
 
   for (let i = 0; i < items.length; i++) {
-    if (!uniqueItems.includes(items[i])) {
-      uniqueItems.push(items[i]);
+    const item = cleanSentence(items[i]);
+
+    if (item.length === 0) {
+      continue;
+    }
+
+    if (!includesSimilar(result, item)) {
+      result.push(item);
     }
   }
 
-  return uniqueItems;
+  return result;
+}
+
+function includesSimilar(items: string[], target: string): boolean {
+  const normalisedTarget = normaliseForCompare(target);
+
+  return items.some((item) => normaliseForCompare(item) === normalisedTarget);
+}
+
+function normaliseForCompare(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").replace(/[.!?]$/, "").trim();
 }

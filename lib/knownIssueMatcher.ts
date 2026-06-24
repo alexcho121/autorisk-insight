@@ -1,23 +1,31 @@
-
-// matcher는 knownissues.ts에서 조건에 맞는 항목만 찾아서
-// 맞는 inspection prioirity 목록을 반환
+// lib/knownIssueMatcher.ts
+// VehicleInput을 knownIssues 데이터와 매칭합니다.
+// knownIssues는 confirmed faults가 아니라 inspection priorities입니다.
 
 import { knownIssues } from "@/data/knownIssues";
 import { KnownIssue, VehicleInput } from "./types";
 
-export function findKnownIssues(vehicle: VehicleInput): KnownIssue[] {  //vehicle input을 받아서 knownIssue[]를 반환.
-  if (!vehicle.year) {
+export function findKnownIssues(vehicle: VehicleInput): KnownIssue[] {
+  if (isUnknown(vehicle.make) || isUnknown(vehicle.model)) {
     return [];
   }
 
-  return knownIssues.filter((issue) => {
-    const makeMatches = normalise(issue.make) === normalise(vehicle.make);  // nomalise-대소문자 같게 판단
-    const modelMatches = isModelMatch(vehicle.model, issue.model);
+  const matchedIssues = knownIssues.filter((issue) => {
+    const makeMatches = normalise(issue.make) === normalise(vehicle.make);
+    const modelMatches = normalise(issue.model) === normalise(vehicle.model);
 
-    const yearMatches =
-      vehicle.year !== null &&
-      vehicle.year >= issue.yearFrom &&
-      vehicle.year <= issue.yearTo;
+    if (!makeMatches || !modelMatches) {
+      return false;
+    }
+
+    if (vehicle.year !== null) {
+      const yearMatches =
+        vehicle.year >= issue.yearFrom && vehicle.year <= issue.yearTo;
+
+      if (!yearMatches) {
+        return false;
+      }
+    }
 
     const fuelMatches = matchesOptionalCondition(
       vehicle.fuelType,
@@ -34,42 +42,10 @@ export function findKnownIssues(vehicle: VehicleInput): KnownIssue[] {  //vehicl
       issue.appliesToBodyStyles
     );
 
-    return (
-      makeMatches &&
-      modelMatches &&
-      yearMatches &&
-      fuelMatches &&
-      transmissionMatches &&
-      bodyStyleMatches
-    );
+    return fuelMatches && transmissionMatches && bodyStyleMatches;
   });
-}
 
-function normalise(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function isModelMatch(vehicleModel: string, issueModel: string): boolean {
-  const normalisedVehicleModel = normalise(vehicleModel);
-  const normalisedIssueModel = normalise(issueModel);
-
-  if (normalisedVehicleModel === "unknown") {
-    return false;
-  }
-
-  if (normalisedVehicleModel === normalisedIssueModel) {
-    return true;
-  }
-
-  if (normalisedVehicleModel.includes(normalisedIssueModel)) {
-    return true;
-  }
-
-  if (normalisedIssueModel.includes(normalisedVehicleModel)) {
-    return true;
-  }
-
-  return false;
+  return sortKnownIssues(matchedIssues);
 }
 
 function matchesOptionalCondition(
@@ -82,13 +58,45 @@ function matchesOptionalCondition(
 
   const normalisedVehicleValue = normalise(vehicleValue);
 
-  if (normalisedVehicleValue === "unknown") {
-    return allowedValues.some((allowedValue) => {
-      return normalise(allowedValue) === "unknown";
-    });
+  // If listing does not clearly mention fuel/transmission/body style,
+  // keep the item as a cautious inspection priority.
+  if (normalisedVehicleValue === "unknown" || normalisedVehicleValue === "") {
+    return true;
   }
 
   return allowedValues.some((allowedValue) => {
     return normalise(allowedValue) === normalisedVehicleValue;
   });
+}
+
+function sortKnownIssues(issues: KnownIssue[]): KnownIssue[] {
+  const severityWeight = {
+    High: 3,
+    Medium: 2,
+    Low: 1,
+  };
+
+  const confidenceWeight = {
+    High: 3,
+    Medium: 2,
+    Low: 1,
+  };
+
+  return [...issues].sort((a, b) => {
+    const severityDiff = severityWeight[b.severity] - severityWeight[a.severity];
+
+    if (severityDiff !== 0) {
+      return severityDiff;
+    }
+
+    return confidenceWeight[b.confidence] - confidenceWeight[a.confidence];
+  });
+}
+
+function isUnknown(value: string): boolean {
+  return value.trim().length === 0 || normalise(value) === "unknown";
+}
+
+function normalise(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
 }

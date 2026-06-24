@@ -2,6 +2,8 @@ import BrandMark from "@/components/BrandMark";
 import VehicleSummaryCard from "@/components/VehicleSummaryCard";
 import { VehicleInput } from "@/lib/types";
 
+//사용자가 수정하는 화면
+
 type ReviewViewProps = {
   vehicle: VehicleInput;
   onVehicleFieldChange: (
@@ -19,24 +21,24 @@ export default function ReviewView({
   onStartOver,
 }: ReviewViewProps) {
   return (
-    <main className="min-h-screen bg-[#EEF1F4] px-4 py-6 text-slate-900 sm:px-6">
+    <main className="min-h-screen bg-[#F8FAFC] px-4 py-6 text-slate-950 sm:px-6">
       <section className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-4xl flex-col justify-center">
-        <div className="rounded-lg border border-slate-300 bg-white p-5 shadow-sm sm:p-6">
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/60 sm:p-5">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <BrandMark />
-              <h1 className="mt-4 text-2xl font-bold text-[#101820] sm:text-3xl">
-                Review the detected vehicle.
+              <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-950">
+                Review details
               </h1>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                Check the extracted basics before running the listing check.
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Edit anything that looks off before the check runs.
               </p>
             </div>
 
             <button
               type="button"
               onClick={onStartOver}
-              className="w-fit rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-[#101820] shadow-sm transition hover:bg-slate-50"
+              className="w-fit rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
             >
               Start over
             </button>
@@ -44,13 +46,13 @@ export default function ReviewView({
 
           <VehicleSummaryCard vehicle={vehicle} />
 
-          <details className="mt-5 rounded-lg border border-slate-300 bg-[#F8FAFC]">
-            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#101820]">
+          <details className="mt-4 rounded-2xl border border-slate-200 bg-[#F8FAFC]">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">
               Edit extracted details
             </summary>
 
             <div className="border-t border-slate-200 p-4">
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <TextInput
                   label="Make"
                   value={vehicle.make}
@@ -96,19 +98,19 @@ export default function ReviewView({
                 />
 
                 <TextInput
-                  label="Body Style"
+                  label="Body"
                   value={vehicle.bodyStyle}
                   onChange={(value) => onVehicleFieldChange("bodyStyle", value)}
                 />
 
                 <TextInput
-                  label="Seller Type"
+                  label="Seller"
                   value={vehicle.sellerType}
                   onChange={(value) => onVehicleFieldChange("sellerType", value)}
                 />
 
                 <TextInput
-                  label="Service History"
+                  label="Service"
                   value={vehicle.serviceHistoryStatus}
                   onChange={(value) =>
                     onVehicleFieldChange("serviceHistoryStatus", value)
@@ -116,7 +118,7 @@ export default function ReviewView({
                 />
               </div>
 
-              <label className="mt-4 flex items-center gap-3 rounded-md border border-slate-300 bg-white p-4">
+              <label className="mt-3 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
                 <input
                   type="checkbox"
                   checked={vehicle.regoMentioned}
@@ -125,24 +127,24 @@ export default function ReviewView({
                   }
                 />
 
-                <span className="text-sm font-medium text-slate-700">
-                  Rego mentioned in listing
+                <span className="text-sm font-medium text-slate-600">
+                  Rego mentioned
                 </span>
               </label>
             </div>
           </details>
 
-          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs leading-5 text-slate-500">
-              The scan uses the edited details and matched inspection priorities.
+              Uses your edits and matched inspection priorities.
             </p>
 
             <button
               type="button"
               onClick={onRunRiskScan}
-              className="rounded-md bg-[#101820] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#182536]"
+              className="rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700"
             >
-              Run Listing Check
+              Run check
             </button>
           </div>
         </div>
@@ -162,9 +164,9 @@ function TextInput({
 }) {
   return (
     <label className="grid gap-1">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className="text-xs font-semibold text-slate-600">{label}</span>
       <input
-        className="rounded-md border border-slate-300 bg-white p-3 text-sm text-slate-900 outline-none focus:border-[#101820] focus:ring-2 focus:ring-[#101820]/10"
+        className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -183,10 +185,10 @@ function NumberInput({
 }) {
   return (
     <label className="grid gap-1">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className="text-xs font-semibold text-slate-600">{label}</span>
       <input
         type="number"
-        className="rounded-md border border-slate-300 bg-white p-3 text-sm text-slate-900 outline-none focus:border-[#101820] focus:ring-2 focus:ring-[#101820]/10"
+        className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
         value={value ?? ""}
         onChange={(event) =>
           onChange(event.target.value === "" ? null : Number(event.target.value))

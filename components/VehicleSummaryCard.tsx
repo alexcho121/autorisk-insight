@@ -10,22 +10,26 @@ export default function VehicleSummaryCard({
   compact = false,
 }: VehicleSummaryCardProps) {
   return (
-    <div className="rounded-lg border border-slate-300 bg-[#F8FAFC] p-4">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           {!compact && (
-            <p className="text-xs font-medium uppercase text-slate-500">
-              Inspection summary
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Vehicle
             </p>
           )}
 
-          <h2 className="mt-1 text-2xl font-bold text-[#101820]">
+          <h2
+            className={`font-bold text-slate-950 ${
+              compact ? "text-lg" : "mt-1 text-xl"
+            }`}
+          >
             {buildVehicleTitle(vehicle)}
           </h2>
 
           {!compact && (
-            <p className="mt-1 text-sm text-slate-600">
-              Confirm these listing details before inspecting the vehicle.
+            <p className="mt-1 text-sm text-slate-500">
+              Review the key listing details.
             </p>
           )}
         </div>
@@ -33,11 +37,11 @@ export default function VehicleSummaryCard({
         <span
           className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${
             vehicle.regoMentioned
-              ? "bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200"
-              : "bg-slate-200 text-slate-700 ring-1 ring-slate-300"
+              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+              : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"
           }`}
         >
-          {vehicle.regoMentioned ? "Rego mentioned" : "Rego not mentioned"}
+          {vehicle.regoMentioned ? "Rego listed" : "No rego"}
         </span>
       </div>
 
@@ -60,7 +64,7 @@ export function VehiclePills({ vehicle }: { vehicle: VehicleInput }) {
       {pills.map((pill, index) => (
         <span
           key={index}
-          className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700"
+          className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600"
         >
           {pill}
         </span>

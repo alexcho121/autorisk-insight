@@ -1,6 +1,5 @@
-// lib/riskEngine.ts
 // Budget-aware Buying Confidence Score.
-// AI/fallback evidence는 보조 근거로만 사용하고, 최종 점수는 rule-based로 계산합니다.
+// AI/fallback evidence supports the explanation; final scoring remains rule-based.
 
 import {
   BudgetRange,
@@ -12,6 +11,7 @@ import {
   RiskResult,
   VehicleInput,
 } from "./types";
+import { reconcileEvidenceWithVehicle } from "./evidenceReconciliation";
 
 type BudgetExpectation = {
   typicalMaxAge: number;
@@ -49,6 +49,9 @@ export function analyseQuickRisk(
   const currentYear = new Date().getFullYear();
   const rawDescription = vehicle.sellerDescription || vehicle.rawListingText || "";
   const lowerDescription = rawDescription.toLowerCase();
+  const reconciledEvidence = evidence
+    ? reconcileEvidenceWithVehicle(evidence, vehicle)
+    : null;
 
   const budgetExpectation = getBudgetExpectation(buyerProfile.budgetRange);
   const budgetLabel = getBudgetRangeLabel(buyerProfile.budgetRange);
@@ -421,21 +424,21 @@ export function analyseQuickRisk(
   }
 
   // 9. AI/fallback evidence
-  if (evidence) {
-    for (let i = 0; i < evidence.positiveSignals.length; i++) {
-      positiveReasons.push(cleanSentence(evidence.positiveSignals[i]));
+  if (reconciledEvidence) {
+    for (let i = 0; i < reconciledEvidence.positiveSignals.length; i++) {
+      positiveReasons.push(cleanSentence(reconciledEvidence.positiveSignals[i]));
     }
 
-    for (let i = 0; i < evidence.missingInformation.length; i++) {
-      const item = cleanSentence(evidence.missingInformation[i]);
+    for (let i = 0; i < reconciledEvidence.missingInformation.length; i++) {
+      const item = cleanSentence(reconciledEvidence.missingInformation[i]);
 
       if (!includesSimilar(missingInformation, item)) {
         missingInformation.push(item);
       }
     }
 
-    for (let i = 0; i < evidence.riskSignals.length; i++) {
-      const signal = evidence.riskSignals[i];
+    for (let i = 0; i < reconciledEvidence.riskSignals.length; i++) {
+      const signal = reconciledEvidence.riskSignals[i];
 
       if (handledEvidenceCategories.has(signal.category)) {
         continue;
@@ -506,7 +509,7 @@ export function analyseQuickRisk(
   const recommendation = getRecommendation(buyingConfidenceScore);
 
   const topReasons = buildTopReasons(positiveReasons, cautionReasons);
-  const nextSteps = buildNextSteps(vehicle, evidence, matchedIssues);
+  const nextSteps = buildNextSteps(vehicle, reconciledEvidence, matchedIssues);
   const summary = buildSummary(buyingConfidenceScore, buyerProfile.budgetRange);
 
   return {

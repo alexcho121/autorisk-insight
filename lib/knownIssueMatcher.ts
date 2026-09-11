@@ -1,6 +1,6 @@
 // lib/knownIssueMatcher.ts
-// VehicleInput을 knownIssues 데이터와 매칭합니다.
-// knownIssues는 confirmed faults가 아니라 inspection priorities입니다.
+// Match extracted vehicle details to source-backed inspection priorities.
+// Known issues are not confirmed faults for a specific listing.
 
 import { knownIssues } from "@/data/knownIssues";
 import { KnownIssue, VehicleInput } from "./types";

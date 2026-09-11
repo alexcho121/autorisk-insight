@@ -2,7 +2,7 @@ import BrandMark from "@/components/BrandMark";
 import VehicleSummaryCard from "@/components/VehicleSummaryCard";
 import { VehicleInput } from "@/lib/types";
 
-//사용자가 수정하는 화면
+// Review screen for user-corrected extraction details.
 
 type ReviewViewProps = {
   vehicle: VehicleInput;

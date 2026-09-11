@@ -4,9 +4,11 @@ import { ChangeEvent, useState } from "react";
 import InputView from "@/components/InputView";
 import ResultView from "@/components/ResultView";
 import ReviewView from "@/components/ReviewView";
+import { reconcileEvidenceWithVehicle } from "@/lib/evidenceReconciliation";
 import { findKnownIssues } from "@/lib/knownIssueMatcher";
 import { extractListingWithAI } from "@/lib/openaiExtractor";
 import { analyseQuickRisk } from "@/lib/riskEngine";
+import { sanitiseVehicleValues } from "@/lib/vehicleValidation";
 import {
   BudgetRange,
   BuyerProfile,
@@ -47,10 +49,6 @@ export default function HomePage() {
   }
 
   async function handleAnalyseClick() {
-    console.log("Button clicked");
-    console.log("Raw listing text:", rawListingText);
-    console.log("Buyer profile:", buyerProfile);
-
     if (rawListingText.trim().length === 0) {
       alert("Please paste a listing first.");
       return;
@@ -59,11 +57,7 @@ export default function HomePage() {
     setIsExtracting(true);
 
     try {
-      console.log("Starting extraction...");
-
       const extraction = await extractListingWithAI(rawListingText);
-
-      console.log("Extraction finished:", extraction);
 
       const vehicle = extraction.vehicle;
 
@@ -80,13 +74,10 @@ export default function HomePage() {
       try {
         const issues = findKnownIssues(vehicle);
         setMatchedIssues(issues);
-        console.log("Matched issues:", issues);
       } catch (error) {
         console.error("Known issue matching failed:", error);
         setMatchedIssues([]);
       }
-
-      console.log("State update requested. Should move to ReviewView.");
     } catch (error) {
       console.error("handleAnalyseClick failed:", error);
       alert("Something went wrong while reading the listing. Check the console.");
@@ -103,13 +94,20 @@ export default function HomePage() {
       return;
     }
 
-    const updatedVehicle = {
+    const updatedVehicle = sanitiseVehicleValues({
       ...extractedVehicle,
       [field]: value,
       extractionMethod: "manual" as const,
-    };
+    });
 
     setExtractedVehicle(updatedVehicle);
+    setExtractedEvidence((currentEvidence) => {
+      if (!currentEvidence) {
+        return currentEvidence;
+      }
+
+      return reconcileEvidenceWithVehicle(currentEvidence, updatedVehicle);
+    });
     setRiskResult(null);
 
     try {
@@ -128,13 +126,13 @@ export default function HomePage() {
     const result = analyseQuickRisk(
       extractedVehicle,
       matchedIssues,
-      extractedEvidence,
+      extractedEvidence
+        ? reconcileEvidenceWithVehicle(extractedEvidence, extractedVehicle)
+        : null,
       buyerProfile
     );
 
     setRiskResult(result);
-
-    console.log("Risk result:", result);
   }
 
   function handleStartOver() {

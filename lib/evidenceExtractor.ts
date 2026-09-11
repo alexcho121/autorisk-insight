@@ -1,6 +1,5 @@
-// lib/evidenceExtractor.ts
-// OpenAI API가 없거나 실패했을 때 사용하는 간단한 evidence fallback입니다.
-// 목표: riskEngine에서 중복 감점되지 않도록 category/severity를 안정적으로 분리합니다.
+// Deterministic evidence fallback used when OpenAI extraction is unavailable.
+// Keep categories stable so riskEngine can avoid duplicate penalties.
 
 import { EvidenceSignal, ListingEvidence } from "./types";
 

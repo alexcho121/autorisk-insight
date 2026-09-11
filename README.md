@@ -105,7 +105,8 @@ components/
 
 lib/
   openaiExtractor.ts
-  mockExtractor.ts
+  fallbackExtractor.ts
+  evidenceReconciliation.ts
   evidenceExtractor.ts
   knownIssueMatcher.ts
   riskEngine.ts

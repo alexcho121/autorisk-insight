@@ -103,7 +103,8 @@ components/
 
 lib/
   openaiExtractor.ts
-  mockExtractor.ts
+  fallbackExtractor.ts
+  evidenceReconciliation.ts
   evidenceExtractor.ts
   knownIssueMatcher.ts
   riskEngine.ts
@@ -221,7 +222,7 @@ Responsibilities:
 
 Security rule: never expose `OPENAI_API_KEY` to browser code and never rename it with a `NEXT_PUBLIC_` prefix.
 
-### `lib/mockExtractor.ts`
+### `lib/fallbackExtractor.ts`
 
 Deterministic fallback vehicle extractor.
 
@@ -294,7 +295,7 @@ Responsibilities:
 The extraction layer has two sources:
 
 * AI extraction from OpenAI through `app/api/extract-listing/route.ts`.
-* Fallback extraction from `mockExtractor.ts` and `evidenceExtractor.ts`.
+* Fallback extraction from `fallbackExtractor.ts` and `evidenceExtractor.ts`.
 
 Current behavior:
 

@@ -1,11 +1,9 @@
-// lib/mockExtractor.ts
-// OpenAI API가 실패하거나 없을 때 사용하는 fallback extractor입니다.
-// 목표: perfect extraction이 아니라, MVP에서 score가 크게 흔들리지 않도록
-// year / price / mileage / rego / service history를 최대한 안정적으로 추출합니다.
+// Deterministic fallback extractor used when OpenAI extraction is unavailable.
+// The goal is stable MVP scoring, not perfect extraction.
 
 import { VehicleInput } from "./types";
 
-export function extractListingMock(rawText: string): VehicleInput {
+export function extractListingFallback(rawText: string): VehicleInput {
   const lowerText = rawText.toLowerCase();
 
   return {
@@ -22,7 +20,7 @@ export function extractListingMock(rawText: string): VehicleInput {
     regoMentioned: detectRegoMentioned(lowerText),
     sellerDescription: rawText,
     rawListingText: rawText,
-    extractionMethod: "mock",
+    extractionMethod: "fallback",
   };
 }
 
@@ -180,6 +178,10 @@ function detectPrice(text: string): number | null {
 }
 
 function detectTransmission(lowerText: string): string {
+  if (lowerText.includes("cvt")) {
+    return "CVT";
+  }
+
   if (
     lowerText.includes("automatic") ||
     lowerText.includes(" auto ") ||
@@ -192,10 +194,6 @@ function detectTransmission(lowerText: string): string {
 
   if (lowerText.includes("manual")) {
     return "Manual";
-  }
-
-  if (lowerText.includes("cvt")) {
-    return "CVT";
   }
 
   return "Unknown";

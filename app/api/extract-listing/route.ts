@@ -2,7 +2,8 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 import { extractEvidenceFallback } from "@/lib/evidenceExtractor";
-import { extractListingMock } from "@/lib/mockExtractor";
+import { reconcileEvidenceWithVehicle } from "@/lib/evidenceReconciliation";
+import { extractListingFallback } from "@/lib/fallbackExtractor";
 import type {
   EvidenceCategory,
   EvidenceSeverity,
@@ -10,6 +11,7 @@ import type {
   ListingEvidence,
   VehicleInput,
 } from "@/lib/types";
+import { sanitiseVehicleValues } from "@/lib/vehicleValidation";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "missing-openai-api-key",
@@ -114,14 +116,10 @@ export async function POST(request: Request) {
   let rawListingText = "";
 
   try {
-    console.log("POST /api/extract-listing received");
-
     const body = await request.json().catch(() => ({}));
     rawListingText = String(body.rawListingText ?? "");
 
     if (rawListingText.trim().length === 0) {
-      console.log("No listing text provided. Using fallback.");
-
       return NextResponse.json(
         buildFallbackResult(
           rawListingText,
@@ -131,8 +129,6 @@ export async function POST(request: Request) {
     }
 
     if (!process.env.OPENAI_API_KEY) {
-      console.log("OPENAI_API_KEY missing. Using fallback.");
-
       return NextResponse.json(
         buildFallbackResult(
           rawListingText,
@@ -142,8 +138,6 @@ export async function POST(request: Request) {
     }
 
     const model = process.env.OPENAI_MODEL || "gpt-5-nano";
-
-    console.log("Starting OpenAI extraction with model:", model);
 
     const response = await client.responses.create({
       model,
@@ -173,8 +167,6 @@ export async function POST(request: Request) {
     const outputText = response.output_text;
 
     if (!outputText) {
-      console.log("OpenAI returned no output. Using fallback.");
-
       return NextResponse.json(
         buildFallbackResult(
           rawListingText,
@@ -186,12 +178,10 @@ export async function POST(request: Request) {
     const parsed = JSON.parse(outputText);
     const vehicle = normaliseVehicle(parsed.vehicle, rawListingText);
     const evidence = normaliseEvidence(parsed.evidence);
-    const fallbackVehicle = extractListingMock(rawListingText);
+    const fallbackVehicle = extractListingFallback(rawListingText);
     const fallbackEvidence = extractEvidenceFallback(rawListingText);
 
     if (!isValidExtraction(vehicle, evidence)) {
-      console.log("OpenAI response failed validation. Using fallback.");
-
       return NextResponse.json(
         buildFallbackResult(
           rawListingText,
@@ -201,7 +191,7 @@ export async function POST(request: Request) {
     }
 
     const mergedVehicle = mergeVehicles(vehicle, fallbackVehicle);
-    const mergedEvidence = cleanEvidence(
+    const mergedEvidence = reconcileEvidenceWithVehicle(
       mergeEvidence(evidence, fallbackEvidence),
       mergedVehicle
     );
@@ -229,12 +219,12 @@ function buildFallbackResult(
   rawListingText: string,
   extractionNote: string
 ): ExtractionResult {
-  const vehicle = extractListingMock(rawListingText);
+  const vehicle = extractListingFallback(rawListingText);
   const evidence = extractEvidenceFallback(rawListingText);
 
   return {
     vehicle,
-    evidence: cleanEvidence(evidence, vehicle),
+    evidence: reconcileEvidenceWithVehicle(evidence, vehicle),
     extractionNote,
   };
 }
@@ -243,7 +233,7 @@ function mergeVehicles(
   openAiVehicle: VehicleInput,
   fallbackVehicle: VehicleInput
 ): VehicleInput {
-  return {
+  return sanitiseVehicleValues({
     ...openAiVehicle,
     make: mergeTextField(openAiVehicle.make, fallbackVehicle.make),
     model: mergeTextField(openAiVehicle.model, fallbackVehicle.model),
@@ -268,7 +258,7 @@ function mergeVehicles(
     sellerDescription: openAiVehicle.rawListingText,
     rawListingText: openAiVehicle.rawListingText,
     extractionMethod: "openai",
-  };
+  });
 }
 
 function mergeEvidence(
@@ -295,28 +285,13 @@ function mergeEvidence(
   };
 }
 
-function cleanEvidence(
-  evidence: ListingEvidence,
-  vehicle: VehicleInput
-): ListingEvidence {
-  return {
-    ...evidence,
-    positiveSignals: uniqueStrings(evidence.positiveSignals),
-    riskSignals: uniqueRiskSignals(evidence.riskSignals),
-    missingInformation: uniqueStrings(evidence.missingInformation).filter(
-      (item) => !isContradictedMissingInformation(item, vehicle, evidence)
-    ),
-    sellerClaims: uniqueStrings(evidence.sellerClaims),
-  };
-}
-
 function normaliseVehicle(
   vehicle: unknown,
   rawListingText: string
 ): VehicleInput {
   const input = vehicle as Partial<VehicleInput>;
 
-  return {
+  return sanitiseVehicleValues({
     make: normaliseText(input?.make),
     model: normaliseText(input?.model),
     year: normaliseNumber(input?.year),
@@ -334,7 +309,7 @@ function normaliseVehicle(
         : normaliseText(input?.sellerDescription),
     rawListingText,
     extractionMethod: "openai",
-  };
+  });
 }
 
 function normaliseEvidence(evidence: unknown): ListingEvidence {
@@ -487,70 +462,6 @@ function mergeServiceHistoryStatus(
   return openAiStatus;
 }
 
-function isContradictedMissingInformation(
-  item: string,
-  vehicle: VehicleInput,
-  evidence: ListingEvidence
-): boolean {
-  const lowerItem = item.toLowerCase();
-
-  if (lowerItem.includes("mileage") || lowerItem.includes("kilomet")) {
-    return vehicle.mileage !== null;
-  }
-
-  if (lowerItem.includes("price") || lowerItem.includes("asking")) {
-    return vehicle.price !== null;
-  }
-
-  if (
-    lowerItem.includes("year") ||
-    lowerItem.includes("model year") ||
-    lowerItem.includes("build year")
-  ) {
-    return vehicle.year !== null;
-  }
-
-  if (
-    lowerItem.includes("rego") ||
-    lowerItem.includes("registration")
-  ) {
-    return vehicle.regoMentioned || hasRiskCategory(evidence, "rego");
-  }
-
-  if (
-    lowerItem.includes("service") ||
-    lowerItem.includes("logbook") ||
-    lowerItem.includes("log book")
-  ) {
-    return (
-      !isUnknownServiceHistory(vehicle.serviceHistoryStatus) ||
-      hasPositiveSignal(evidence, ["service", "logbook", "log book"]) ||
-      hasRiskCategory(evidence, "service_history")
-    );
-  }
-
-  if (lowerItem.includes("transmission") || lowerItem.includes("gearbox")) {
-    return !isUnknownText(vehicle.transmission);
-  }
-
-  if (lowerItem.includes("fuel")) {
-    return !isUnknownText(vehicle.fuelType);
-  }
-
-  if (lowerItem.includes("body")) {
-    return !isUnknownText(vehicle.bodyStyle);
-  }
-
-  if (lowerItem.includes("rwc") || lowerItem.includes("roadworthy")) {
-    return (
-      hasPositiveSignal(evidence, ["rwc", "roadworthy"]) ||
-      hasRiskCategory(evidence, "rwc")
-    );
-  }
-
-  return false;
-}
-
 function uniqueStrings(items: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -587,24 +498,6 @@ function uniqueRiskSignals(signals: ListingEvidence["riskSignals"]) {
   }
 
   return result;
-}
-
-function hasPositiveSignal(
-  evidence: ListingEvidence,
-  keywords: string[]
-): boolean {
-  return evidence.positiveSignals.some((signal) => {
-    const lowerSignal = signal.toLowerCase();
-
-    return keywords.some((keyword) => lowerSignal.includes(keyword));
-  });
-}
-
-function hasRiskCategory(
-  evidence: ListingEvidence,
-  category: EvidenceCategory
-): boolean {
-  return evidence.riskSignals.some((signal) => signal.category === category);
 }
 
 function isUnknownText(value: string): boolean {

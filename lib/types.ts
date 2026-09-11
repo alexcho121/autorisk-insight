@@ -1,4 +1,4 @@
-// types.ts는 데이터가 따라야 하는 약속/규칙
+// Shared domain contracts for extracted listings, evidence, and scoring.
 
 export type VehicleInput = {
   make: string;
@@ -14,7 +14,7 @@ export type VehicleInput = {
   regoMentioned: boolean;
   sellerDescription: string;
   rawListingText: string;
-  extractionMethod: "mock" | "regex" | "openai" | "manual";
+  extractionMethod: "fallback" | "regex" | "openai" | "manual";
 };
 
 export type BudgetRange =

@@ -4,16 +4,14 @@
 // If AI extraction is disabled or fails, use fallback extraction.
 
 import { extractEvidenceFallback } from "./evidenceExtractor";
-import { extractListingMock } from "./mockExtractor";
+import { reconcileEvidenceWithVehicle } from "./evidenceReconciliation";
+import { extractListingFallback } from "./fallbackExtractor";
 import { ExtractionResult } from "./types";
 
 export async function extractListingWithAI(
   rawListingText: string
 ): Promise<ExtractionResult> {
   const useAI = process.env.NEXT_PUBLIC_USE_AI_EXTRACTION === "true";
-
-  console.log("NEXT_PUBLIC_USE_AI_EXTRACTION:", process.env.NEXT_PUBLIC_USE_AI_EXTRACTION);
-  console.log("AI extraction enabled:", useAI);
 
   if (!useAI) {
     return buildClientFallback(
@@ -23,8 +21,6 @@ export async function extractListingWithAI(
   }
 
   try {
-    console.log("Calling /api/extract-listing...");
-
     const response = await fetch("/api/extract-listing", {
       method: "POST",
       headers: {
@@ -32,8 +28,6 @@ export async function extractListingWithAI(
       },
       body: JSON.stringify({ rawListingText }),
     });
-
-    console.log("API response status:", response.status);
 
     if (!response.ok) {
       return buildClientFallback(
@@ -43,8 +37,6 @@ export async function extractListingWithAI(
     }
 
     const data = (await response.json()) as ExtractionResult;
-
-    console.log("API extraction result:", data);
 
     if (!data.vehicle || !data.evidence) {
       return buildClientFallback(
@@ -68,9 +60,14 @@ function buildClientFallback(
   rawListingText: string,
   extractionNote: string
 ): ExtractionResult {
+  const vehicle = extractListingFallback(rawListingText);
+
   return {
-    vehicle: extractListingMock(rawListingText),
-    evidence: extractEvidenceFallback(rawListingText),
+    vehicle,
+    evidence: reconcileEvidenceWithVehicle(
+      extractEvidenceFallback(rawListingText),
+      vehicle
+    ),
     extractionNote,
   };
 }
